@@ -1,4 +1,4 @@
-module github.com/actionutils/gitsign-inspector
+module github.com/actionutils/sigspy
 
 go 1.24.2
 
