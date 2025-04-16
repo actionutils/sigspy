@@ -176,7 +176,8 @@ jobs:
 
       - name: Download assets
         env:
-          PROVENANCE: "${{ needs.generate-provenance.outputs.provenance-name }}"
+          PROVENANCE: ${{ needs.generate-provenance.outputs.provenance-name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh -R "$GITHUB_REPOSITORY" release download "$GITHUB_REF_NAME" -p "*.tar.gz"
@@ -209,6 +210,8 @@ jobs:
         uses: sigstore/cosign-installer@v3.8.1
 
       - name: Download assets
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh -R "$GITHUB_REPOSITORY" release download "$GITHUB_REF_NAME"
 
