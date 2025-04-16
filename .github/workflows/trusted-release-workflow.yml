@@ -1,0 +1,157 @@
+name: Trusted Go Release Workflow
+
+# This workflow creates a SLSA-compliant release for GitHub repositories
+# It's designed as a reusable workflow that can be called from other workflows
+# It enforces releases only through labeled PRs (bump:patch, bump:minor, bump:major)
+on:
+  workflow_call:
+    inputs:
+      branch:
+        description: 'The working branch'
+        required: false
+        default: ${{ github.event.repository.default_branch }}
+        type: string
+      draft:
+        description: 'Whether to keep the release as a draft'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      github-token:
+        description: 'GitHub token with appropriate permissions'
+        required: true
+    outputs:
+      tag_name:
+        description: 'The tag name created or used for this release'
+        value: ${{ jobs.version.outputs.tag_name }}
+      version:
+        description: 'The version number without "v" prefix'
+        value: ${{ jobs.version.outputs.version }}
+      release_url:
+        description: 'URL of the created GitHub release'
+        value: ${{ jobs.release.outputs.release_url }}
+
+jobs:
+  # Version management and tag creation job
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # Enable OIDC
+      contents: write # Tag updates
+      pull-requests: write # Post comment
+    outputs:
+      tag_name: ${{ steps.tag.outputs.value }}
+      version: ${{ steps.extract-version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      # Set up signed tag configuration
+      - uses: chainguard-dev/actions/setup-gitsign@v1.0.1
+
+      # Bump version based on PR labels (bump:major,bump:minor,bump:patch)
+      - id: bumpr
+        uses: haya14busa/action-bumpr@v1.11.4
+
+      # Get tag name from bumpr output only
+      - id: tag
+        run: |
+          if [[ "${{ steps.bumpr.outputs.skip }}" == "true" ]]; then
+            echo "value=" >> $GITHUB_OUTPUT
+            echo "No version bump label found, skipping release."
+          else
+            TAG="${{ steps.bumpr.outputs.next_version }}"
+            echo "value=${TAG}" >> $GITHUB_OUTPUT
+            echo "Next version: ${TAG}"
+          fi
+
+      # Extract version number without "v" prefix (v1.2.3 → 1.2.3)
+      - id: extract-version
+        if: steps.tag.outputs.value != ''
+        run: |
+          TAG=${{ steps.tag.outputs.value }}
+          VERSION=${TAG#refs/tags/v}
+          VERSION=${VERSION#v}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Extracted version: ${VERSION}"
+
+  goreleaser:
+    needs: [version]
+    if: needs.version.outputs.tag_name != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # needed to write releases
+      id-token: write # needed for keyless signing
+      packages: write # needed for ghcr access
+      attestations: write # needed for provenance
+    outputs:
+      base64-subjects: ${{ steps.binary.outputs.base64-subjects }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0 # this is important, otherwise it won't checkout the full tree (i.e. no previous tags)
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+
+      - uses: sigstore/cosign-installer@v3.8.1 # installs cosign
+      - uses: anchore/sbom-action/download-syft@v0.18.0 # installs syft
+      - uses: goreleaser/goreleaser-action@v6 # run goreleaser
+        id: goreleaser
+        with:
+          version: '~> v2'
+          args: release --clean --draft
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate binary hashes
+        id: binary
+        env:
+          ARTIFACTS: "${{ steps.goreleaser.outputs.artifacts }}"
+        run: |
+          set -euo pipefail
+          checksum_file=$(echo "$ARTIFACTS" | jq -r '.[] | select (.type=="Checksum") | .path')
+          echo "base64-subjects=$(cat $checksum_file | base64 -w0)" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-checksums: ./dist/checksums.txt
+
+  # Generate SLSA provenance using reusable workflow
+  generate-provenance:
+    needs: [version, goreleaser]
+    if: needs.version.outputs.tag_name != ''
+    permissions:
+      id-token: write    # Required for SLSA provenance generation
+      contents: write    # Required for attestations
+      actions: read      # Required to access workflow information
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.goreleaser.outputs.base64-subjects }}
+      upload-assets: true
+      upload-tag-name: ${{ needs.version.outputs.tag_name }}
+      draft-release: true
+
+  release:
+    needs: [version, generate-provenance]
+    if: needs.version.outputs.tag_name != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required for release creation
+    outputs:
+      release_url: ${{ steps.update_release.outputs.release_url }}
+    steps:
+      - name: Update GitHub Release
+        id: update_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.github-token }}
+        run: |
+          TAG_NAME="${{ needs.version.outputs.tag_name }}"
+
+          # Update release
+          RELEASE_URL=$(gh release edit "$TAG_NAME" \
+            --title "Release $TAG_NAME" \
+            --draft=${{ inputs.draft }})
+
+          echo "release_url=$RELEASE_URL" >> $GITHUB_OUTPUT
+          echo "Release URL: $RELEASE_URL"
