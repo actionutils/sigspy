@@ -166,7 +166,7 @@ jobs:
           echo "Release URL: $RELEASE_URL"
 
   verification-with-slsa-verifier:
-    needs: [goreleaser, generate-provenance]
+    needs: [release, goreleaser, generate-provenance]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -200,7 +200,7 @@ jobs:
 
   # https://goreleaser.com/install/#verifying-the-artifacts
   verification-with-cosign:
-    needs: [goreleaser, generate-provenance]
+    needs: [release, goreleaser, generate-provenance]
     runs-on: ubuntu-latest
     permissions:
       contents: read
