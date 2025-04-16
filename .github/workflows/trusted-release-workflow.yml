@@ -222,7 +222,7 @@ jobs:
         env:
           ARTIFACTS: ${{ needs.goreleaser.outputs.artifacts }}
         run: |
-          checksum_file=$(echo "$ARTIFACTS" | jq -r '.[] | select (.type=="Checksum") | .path')
+          checksum_file=$(echo "$ARTIFACTS" | jq -r '.[] | select (.type=="Checksum") | .name')
           echo "checksum file: ${checksum_file}"
           echo "checksum_file=${checksum_file}" >> $GITHUB_OUTPUT
 
