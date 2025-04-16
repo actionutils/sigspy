@@ -83,7 +83,6 @@ jobs:
     permissions:
       contents: write # needed to write releases
       id-token: write # needed for keyless signing
-      packages: write # needed for ghcr access
       attestations: write # needed for provenance
     outputs:
       base64-subjects: ${{ steps.binary.outputs.base64-subjects }}
