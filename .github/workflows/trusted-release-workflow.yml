@@ -168,7 +168,8 @@ jobs:
   verification-with-slsa-verifier:
     needs: [goreleaser, generate-provenance]
     runs-on: ubuntu-latest
-    permissions: read-all
+    permissions:
+      contents: read
     steps:
       - name: Install the verifier
         uses: slsa-framework/slsa-verifier/actions/installer@v2.7.0
@@ -201,7 +202,8 @@ jobs:
   verification-with-cosign:
     needs: [goreleaser, generate-provenance]
     runs-on: ubuntu-latest
-    permissions: read-all
+    permissions:
+      contents: read
     steps:
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3.8.1
