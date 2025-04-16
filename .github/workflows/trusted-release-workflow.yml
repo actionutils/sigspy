@@ -86,6 +86,7 @@ jobs:
       attestations: write # needed for provenance
     outputs:
       base64-subjects: ${{ steps.binary.outputs.base64-subjects }}
+      artifacts: ${{ steps.goreleaser.outputs.artifacts }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -115,6 +116,10 @@ jobs:
       - uses: actions/attest-build-provenance@v2
         with:
           subject-checksums: ./dist/checksums.txt
+      # Generate attestations for checksum.txt file itself.
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ./dist/checksums.txt
 
   # Generate SLSA provenance using reusable workflow
   generate-provenance:
@@ -159,3 +164,76 @@ jobs:
 
           echo "release_url=$RELEASE_URL" >> $GITHUB_OUTPUT
           echo "Release URL: $RELEASE_URL"
+
+  verification-with-slsa-verifier:
+    needs: [goreleaser, generate-provenance]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Install the verifier
+        uses: slsa-framework/slsa-verifier/actions/installer@v2.7.0
+
+      - name: Download assets
+        env:
+          PROVENANCE: "${{ needs.generate-provenance.outputs.provenance-name }}"
+        run: |
+          set -euo pipefail
+          gh -R "$GITHUB_REPOSITORY" release download "$GITHUB_REF_NAME" -p "*.tar.gz"
+          gh -R "$GITHUB_REPOSITORY" release download "$GITHUB_REF_NAME" -p "*.zip"
+          gh -R "$GITHUB_REPOSITORY" release download "$GITHUB_REF_NAME" -p "*.sbom.json"
+          gh -R "$GITHUB_REPOSITORY" release download "$GITHUB_REF_NAME" -p "$PROVENANCE"
+      - name: Verify assets
+        env:
+          CHECKSUMS: ${{ needs.goreleaser.outputs.base64-subjects }}
+          PROVENANCE: ${{ needs.generate-provenance.outputs.provenance-name }}
+        run: |
+          set -euo pipefail
+          checksums=$(echo "$CHECKSUMS" | base64 -d)
+          while read -r line; do
+              fn=$(echo $line | cut -d ' ' -f2)
+              echo "Verifying $fn"
+              slsa-verifier verify-artifact --provenance-path "$PROVENANCE" \
+                                            --source-uri "github.com/$GITHUB_REPOSITORY" \
+                                            "$fn"
+          done <<<"$checksums"
+
+  # https://goreleaser.com/install/#verifying-the-artifacts
+  verification-with-cosign:
+    needs: [goreleaser, generate-provenance]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.8.1
+
+      - name: Download assets
+        run: |
+          gh -R "$GITHUB_REPOSITORY" release download "$GITHUB_REF_NAME"
+
+      - name: Get checksum file name
+        id: checksumtxt
+        env:
+          ARTIFACTS: ${{ needs.goreleaser.outputs.artifacts }}
+        run: |
+          checksum_file=$(echo "$ARTIFACTS" | jq -r '.[] | select (.type=="Checksum") | .path')
+          echo "checksum file: ${checksum_file}"
+          echo "checksum_file=${checksum_file}" >> $GITHUB_OUTPUT
+
+      - name: Verify checksum signature
+        env:
+          checksum_file: ${{ steps.checksumtxt.outputs.checksum_file }}
+        run: |
+          cosign verify-blob \
+            --certificate-identity-regexp '^https://github.com/' \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+            --cert "${checksum_file}.pem" \
+            --signature "${checksum_file}.sig" \
+            "${checksum_file}"
+
+      - name: Verify checksum
+        env:
+          checksum_file: ${{ steps.checksumtxt.outputs.checksum_file }}
+        run: |
+          sha256sum --ignore-missing -c "${checksum_file}"
