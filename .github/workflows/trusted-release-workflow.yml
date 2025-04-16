@@ -140,6 +140,11 @@ jobs:
     outputs:
       release_url: ${{ steps.update_release.outputs.release_url }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.version.outputs.tag_name }}
+
       - name: Update GitHub Release
         id: update_release
         env:
