@@ -166,7 +166,7 @@ jobs:
           echo "Release URL: $RELEASE_URL"
 
   verification-with-slsa-verifier:
-    needs: [release, goreleaser, generate-provenance]
+    needs: [version, release, goreleaser, generate-provenance]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -178,12 +178,13 @@ jobs:
         env:
           PROVENANCE: ${{ needs.generate-provenance.outputs.provenance-name }}
           GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.version.outputs.tag_name }}
         run: |
           set -euo pipefail
-          gh -R "$GITHUB_REPOSITORY" release download "$GITHUB_REF_NAME" -p "*.tar.gz"
-          gh -R "$GITHUB_REPOSITORY" release download "$GITHUB_REF_NAME" -p "*.zip"
-          gh -R "$GITHUB_REPOSITORY" release download "$GITHUB_REF_NAME" -p "*.sbom.json"
-          gh -R "$GITHUB_REPOSITORY" release download "$GITHUB_REF_NAME" -p "$PROVENANCE"
+          gh -R "$GITHUB_REPOSITORY" release download "$TAG_NAME" -p "*.tar.gz"
+          gh -R "$GITHUB_REPOSITORY" release download "$TAG_NAME" -p "*.zip"
+          gh -R "$GITHUB_REPOSITORY" release download "$TAG_NAME" -p "*.sbom.json"
+          gh -R "$GITHUB_REPOSITORY" release download "$TAG_NAME" -p "$PROVENANCE"
       - name: Verify assets
         env:
           CHECKSUMS: ${{ needs.goreleaser.outputs.base64-subjects }}
@@ -201,7 +202,7 @@ jobs:
 
   # https://goreleaser.com/install/#verifying-the-artifacts
   verification-with-cosign:
-    needs: [release, goreleaser, generate-provenance]
+    needs: [version, release, goreleaser, generate-provenance]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -212,8 +213,9 @@ jobs:
       - name: Download assets
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.version.outputs.tag_name }}
         run: |
-          gh -R "$GITHUB_REPOSITORY" release download "$GITHUB_REF_NAME"
+          gh -R "$GITHUB_REPOSITORY" release download "$TAG_NAME"
 
       - name: Get checksum file name
         id: checksumtxt
