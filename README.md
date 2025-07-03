@@ -49,9 +49,9 @@ sigspy -input-format=<format> < certificate_file
 ```
 
 Formats:
-- `pkcs7` (default) - Git signatures and signed messages
-- `der` - Raw binary certificates
-- `pem` - Base64-encoded certificates
+- `pkcs7` (default) - PEM-encoded PKCS7 signatures (e.g., Git signatures)
+- `der` - Raw binary certificate data
+- `pem` - PEM-encoded certificates (-----BEGIN CERTIFICATE-----)
 
 ## Examples
 
@@ -64,8 +64,8 @@ gh attestation verify artifact.txt --owner myorg --format json | \
   jq -r '.[0].attestation.bundle.verificationMaterial.certificate.rawBytes' | \
   base64 -d | sigspy -input-format=der | jq .
 
-# Parse PEM certificate
-cat certificate.pem | sigspy -input-format=pem | jq .
+# Parse PEM certificate (decode base64 if needed)
+curl -sL https://github.com/actionutils/sigspy/releases/download/v1.0.0/checksums.txt.pem | base64 -d | sigspy -input-format=pem | jq .
 ```
 
 ## Output
