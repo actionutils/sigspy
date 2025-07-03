@@ -1,0 +1,49 @@
+name: Test Install Script Generation
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['.config/binstaller.yml']
+
+jobs:
+  test-generation-and-execution:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actionutils/trusted-tag-verifier@v0
+        with:
+          verify: 'binary-install/setup-x@v1'
+
+      - name: Install binstaller
+        uses: binary-install/setup-x@v1
+        with:
+          script_url: https://raw.githubusercontent.com/binary-install/binstaller/main/install.sh
+          gh_attestations_verify_flags: --repo binary-install/binstaller --cert-identity-regex=.github/workflows/generate-installer.yml@refs/heads/main
+
+      - name: Generate test install script
+        run: binst gen -o test-install.sh
+
+      - name: Validate script syntax
+        run: |
+          echo "🔍 Validating shell script syntax..."
+          if ! bash -n test-install.sh; then
+            echo "❌ Invalid shell script syntax"
+            exit 1
+          fi
+          echo "✅ Script syntax is valid"
+
+      - name: Test script execution
+        run: |
+          echo "🧪 Testing install script execution..."
+          chmod +x test-install.sh
+          ./test-install.sh
+          echo "✅ Script execution test completed successfully"
+
+      - name: Upload test script as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-install-script
+          path: test-install.sh
+          retention-days: 7
+
