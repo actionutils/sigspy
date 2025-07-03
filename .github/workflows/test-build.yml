@@ -23,6 +23,28 @@ jobs:
       - name: Build binary
         run: go build -v -o sigspy main.go
 
-      - name: Run command
+      - name: gitsign (-input-format=pkcs7)
         run: |
-          git cat-file tag v0.0.7 | sed -n '/-BEGIN/, /-END/p' | sed 's/^ //g' | sed 's/gpgsig //g' | ./sigspy -input-format=pkcs7 | jq -S .
+          git cat-file tag v1.0.0 |
+            sed -n '/-BEGIN/, /-END/p' |
+            sed 's/^ //g' |
+            sed 's/gpgsig //g' |
+            ./sigspy -input-format=pkcs7 |
+            jq -S .
+
+      - name: checksum.pem (-input-format=pem)
+        run: |
+          curl -sL https://github.com/actionutils/sigspy/releases/download/v1.0.0/checksums.txt.pem |
+            base64 -d |
+            ./sigspy -input-format=pem |
+            jq -S .
+
+      - name: gh attestation (-input-format=der)
+        run: |
+          wget https://github.com/actionutils/sigspy/releases/download/v1.0.0/checksums.txt
+          gh attestation verify checksums.txt --owner actionutils --format json |
+            jq -r '.[0].attestation.bundle.verificationMaterial.certificate.rawBytes' |
+            base64 -d |
+            ./sigspy -input-format=der |
+            jq -S .
+
