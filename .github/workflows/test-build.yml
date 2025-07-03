@@ -25,6 +25,7 @@ jobs:
 
       - name: gitsign (-input-format=pkcs7)
         run: |
+          set -euo pipefail
           git cat-file tag v1.0.0 |
             sed -n '/-BEGIN/, /-END/p' |
             sed 's/^ //g' |
@@ -34,6 +35,7 @@ jobs:
 
       - name: checksum.pem (-input-format=pem)
         run: |
+          set -euo pipefail
           curl -sL https://github.com/actionutils/sigspy/releases/download/v1.0.0/checksums.txt.pem |
             base64 -d |
             ./sigspy -input-format=pem |
@@ -43,6 +45,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           wget https://github.com/actionutils/sigspy/releases/download/v1.0.0/checksums.txt
           gh attestation verify checksums.txt --owner actionutils --format json |
             jq -r '.[0].attestation.bundle.verificationMaterial.certificate.rawBytes' |
