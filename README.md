@@ -38,7 +38,7 @@ cat certificate.pem | sigspy -input-format=pem | jq .
 
 ## Output
 
-JSON containing parsed Fulcio certificate extensions:
+JSON containing parsed [Fulcio certificate extensions](https://github.com/sigstore/fulcio/blob/main/docs/oid-info.md):
 
 ```json
 {
