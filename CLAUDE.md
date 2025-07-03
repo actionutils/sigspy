@@ -9,7 +9,7 @@ Sigspy is a command-line tool that extracts and parses certificate extensions fr
 ## Commands
 
 ### Build
-```bash
+```shell
 # Standard build
 go build -v -o sigspy main.go
 
@@ -19,7 +19,7 @@ goreleaser build --snapshot --clean
 
 ### Test
 The project uses example-based testing. Run these commands to test functionality:
-```bash
+```shell
 # Test with gitsign example (PKCS7 format)
 git cat-file tag v1.0.0 | sed -n '/-BEGIN/, /-END/p' | sed 's/^ //g' | sed 's/gpgsig //g' | ./sigspy -input-format=pkcs7 | jq -S .
 
@@ -31,7 +31,7 @@ gh attestation verify checksums.txt --owner actionutils --format json | jq -r '.
 ```
 
 ### Development
-```bash
+```shell
 # Run directly without building
 go run main.go -input-format=pkcs7 < input.pem
 
