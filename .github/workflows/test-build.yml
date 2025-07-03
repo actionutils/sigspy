@@ -40,6 +40,8 @@ jobs:
             jq -S .
 
       - name: gh attestation (-input-format=der)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           wget https://github.com/actionutils/sigspy/releases/download/v1.0.0/checksums.txt
           gh attestation verify checksums.txt --owner actionutils --format json |
