@@ -58,8 +58,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          wget https://github.com/actionutils/sigspy/releases/download/v1.0.0/install.sh
-          gh attestation download install.sh --owner actionutils
+          wget -O test-install.sh https://github.com/actionutils/sigspy/releases/download/v1.0.0/install.sh
+          gh attestation download test-install.sh --owner actionutils
           # Find the JSONL file
           jsonl_file=$(ls *.jsonl | head -1)
           cat "$jsonl_file" |
