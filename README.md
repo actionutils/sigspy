@@ -1,30 +1,14 @@
 # sigspy
 
-A command-line tool to extract and parse certificate extensions from Sigstore-signed certificates.
-
-## Overview
-
-Sigspy reads certificate data from stdin and outputs parsed Fulcio certificate extensions as JSON. It's designed to help inspect and understand the claims embedded in Sigstore certificates used for software supply chain security.
+Extract and parse certificate extensions from Sigstore-signed certificates.
 
 ## Installation
-
-### Using Go
 
 ```bash
 go install github.com/actionutils/sigspy@latest
 ```
 
-### Download Binary
-
-Download pre-built binaries from the [releases page](https://github.com/actionutils/sigspy/releases).
-
-### Build from Source
-
-```bash
-git clone https://github.com/actionutils/sigspy.git
-cd sigspy
-go build -o sigspy main.go
-```
+Or download binaries from [releases](https://github.com/actionutils/sigspy/releases).
 
 ## Usage
 
@@ -32,76 +16,50 @@ go build -o sigspy main.go
 sigspy -input-format=<format> < certificate_file
 ```
 
-### Input Formats
+Formats:
+- `pkcs7` (default) - Git signatures and signed messages
+- `der` - Raw binary certificates
+- `pem` - Base64-encoded certificates
 
-- **pkcs7** (default): For Git signatures and signed messages
-- **der**: Raw binary certificate format
-- **pem**: Base64-encoded certificate format
-
-### Examples
-
-#### Parse a gitsign signature
+## Examples
 
 ```bash
-git cat-file tag v1.0.0 | sed -n '/-BEGIN/, /-END/p' | sed 's/^ //g' | sed 's/gpgsig //g' | sigspy -input-format=pkcs7 | jq .
-```
+# Parse gitsign signature
+git cat-file tag v1.0.0 | sed -n '/-BEGIN/, /-END/p' | sed 's/^ //g' | sed 's/gpgsig //g' | sigspy | jq .
 
-#### Parse a PEM certificate
-
-```bash
-cat certificate.pem | sigspy -input-format=pem | jq .
-```
-
-#### Parse a DER certificate
-
-```bash
-cat certificate.der | sigspy -input-format=der | jq .
-```
-
-#### Parse GitHub attestation certificate
-
-```bash
+# Parse GitHub attestation
 gh attestation verify artifact.txt --owner myorg --format json | \
   jq -r '.[0].attestation.bundle.verificationMaterial.certificate.rawBytes' | \
-  base64 -d | \
-  sigspy -input-format=der | jq .
+  base64 -d | sigspy -input-format=der | jq .
+
+# Parse PEM certificate
+cat certificate.pem | sigspy -input-format=pem | jq .
 ```
 
 ## Output
 
-Sigspy outputs JSON containing the parsed Fulcio certificate extensions, which may include:
+JSON containing parsed Fulcio certificate extensions:
 
-- Build signer URI
-- Build signer digest
-- Runner environment
-- Source repository URI
-- Source repository digest
-- Source repository ref
-- Source repository identifier
-- Source repository owner URI
-- Source repository owner identifier
-- Build config URI
-- Build config digest
-- Build trigger
-- Run invocation URI
-- Issuer (V2)
-
-## Use Cases
-
-- **Inspect gitsign signatures**: Understand the identity claims in Git commit/tag signatures
-- **Verify GitHub Actions attestations**: Extract build provenance from GitHub-generated attestations
-- **Debug Sigstore certificates**: Troubleshoot issues with Fulcio-issued certificates
-- **Audit software supply chain**: Analyze the build metadata in signed artifacts
-
-## Requirements
-
-- Go 1.24.2 or later (for building)
-- No runtime dependencies (static binary)
-
-## License
-
-[Add license information here]
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+```json
+{
+  "Issuer": "https://token.actions.githubusercontent.com",
+  "GithubWorkflowTrigger": "push",
+  "GithubWorkflowSHA": "91cce99aa1af750c246b622e3341a890900a3026",
+  "GithubWorkflowName": "Release",
+  "GithubWorkflowRepository": "actionutils/sigspy",
+  "GithubWorkflowRef": "refs/heads/main",
+  "BuildSignerURI": "https://github.com/actionutils/trusted-go-releaser/.github/workflows/trusted-release-workflow.yml@refs/tags/v0",
+  "BuildSignerDigest": "18dbcad44783005261a22d90382dd03adeaefc12",
+  "RunnerEnvironment": "github-hosted",
+  "SourceRepositoryURI": "https://github.com/actionutils/sigspy",
+  "SourceRepositoryDigest": "91cce99aa1af750c246b622e3341a890900a3026",
+  "SourceRepositoryRef": "refs/heads/main",
+  "SourceRepositoryIdentifier": "967219080",
+  "SourceRepositoryOwnerURI": "https://github.com/actionutils",
+  "SourceRepositoryOwnerIdentifier": "206433623",
+  "BuildConfigURI": "https://github.com/actionutils/sigspy/.github/workflows/release.yml@refs/heads/main",
+  "BuildConfigDigest": "91cce99aa1af750c246b622e3341a890900a3026",
+  "BuildTrigger": "push",
+  "RunInvocationURI": "https://github.com/actionutils/sigspy/actions/runs/16041355680/attempts/1",
+  "SourceRepositoryVisibilityAtSigning": "public"
+}
