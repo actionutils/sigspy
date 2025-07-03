@@ -66,6 +66,11 @@ gh attestation verify artifact.txt --owner myorg --format json | \
 
 # Parse PEM certificate (decode base64 if needed)
 curl -sL https://github.com/actionutils/sigspy/releases/download/v1.0.0/checksums.txt.pem | base64 -d | sigspy -input-format=pem | jq .
+
+# Parse certificate from attestation JSONL
+gh attestation download artifact.txt --owner myorg
+cat *.jsonl | jq -r '.verificationMaterial.tlogEntries[0].canonicalizedBody' | \
+  base64 -d | jq -r '.spec.signatures[0].verifier' | base64 -d | sigspy -input-format=pem | jq .
 ```
 
 ## Output
