@@ -53,3 +53,20 @@ jobs:
             ./sigspy -input-format=der |
             jq -S .
 
+      - name: gh attestation download JSONL (-input-format=pem)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          wget https://github.com/actionutils/sigspy/releases/download/v1.0.0/install.sh
+          gh attestation download install.sh --owner actionutils
+          # Find the JSONL file
+          jsonl_file=$(ls *.jsonl | head -1)
+          cat "$jsonl_file" |
+            jq -r '.verificationMaterial.tlogEntries[0].canonicalizedBody' |
+            base64 -d |
+            jq -r '.spec.signatures[0].verifier' |
+            base64 -d |
+            ./sigspy -input-format=pem |
+            jq -S .
+
