@@ -102,3 +102,8 @@ JSON containing parsed [Fulcio certificate extensions](https://github.com/sigsto
   "RunInvocationURI": "https://github.com/actionutils/sigspy/actions/runs/16041355680/attempts/1",
   "SourceRepositoryVisibilityAtSigning": "public"
 }
+```
+
+## :bird: Author
+haya14busa [![GitHub followers](https://img.shields.io/github/followers/haya14busa.svg?style=social&label=Follow)](https://github.com/haya14busa)
+[![Github-sponsors](https://img.shields.io/badge/sponsor-30363D?style=for-the-badge&logo=GitHub-Sponsors&logoColor=#EA4AAA)](https://github.com/sponsors/haya14busa)
