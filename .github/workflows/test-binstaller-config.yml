@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths: ['.config/binstaller.yml']
 
+permissions:
+  contents: read
+
 jobs:
   test-generation-and-execution:
     runs-on: ubuntu-latest
