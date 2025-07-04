@@ -1,5 +1,7 @@
 # sigspy
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/actionutils/sigspy/badge)](https://scorecard.dev/viewer/?uri=github.com/actionutils/sigspy)
+
 Extract and parse certificate extensions from Sigstore-signed certificates.
 
 ## Installation
