@@ -8,6 +8,9 @@ on:
     types:
       - labeled  # Run when PRs are labeled
 
+permissions:
+  contents: read
+
 jobs:
   verify-releaser:
     runs-on: ubuntu-latest
