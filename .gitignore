@@ -1,2 +1,13 @@
-# Added by goreleaser init:
+# Local Go build cache
+.gocache/
+
+# Binaries / dists
+bin/
 dist/
+
+# Go workspace file
+go.work
+
+# macOS
+.DS_Store
+

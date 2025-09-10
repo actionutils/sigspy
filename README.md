@@ -77,30 +77,41 @@ cat *.jsonl | jq -r '.verificationMaterial.tlogEntries[0].canonicalizedBody' | \
 
 ## Output
 
-JSON containing parsed [Fulcio certificate extensions](https://github.com/sigstore/fulcio/blob/main/docs/oid-info.md):
+sigspy now returns a single JSON envelope that is easy to extend and includes:
+
+- `certificate`: basic x509 summary (subject/issuer/serial/validity/SANs/fingerprint)
+- `fulcio_extensions`: parsed [Fulcio OIDs](https://github.com/sigstore/fulcio/blob/main/docs/oid-info.md)
+- `cms`: when input is PKCS7, signed attributes digest and signature info
+- `rekor`: when available, embedded TransparencyLogEntry (JSON) from OID `1.3.6.1.4.1.57264.3.1`
+
+Example (trimmed):
 
 ```json
 {
-  "Issuer": "https://token.actions.githubusercontent.com",
-  "GithubWorkflowTrigger": "push",
-  "GithubWorkflowSHA": "91cce99aa1af750c246b622e3341a890900a3026",
-  "GithubWorkflowName": "Release",
-  "GithubWorkflowRepository": "actionutils/sigspy",
-  "GithubWorkflowRef": "refs/heads/main",
-  "BuildSignerURI": "https://github.com/actionutils/trusted-go-releaser/.github/workflows/trusted-release-workflow.yml@refs/tags/v0",
-  "BuildSignerDigest": "18dbcad44783005261a22d90382dd03adeaefc12",
-  "RunnerEnvironment": "github-hosted",
-  "SourceRepositoryURI": "https://github.com/actionutils/sigspy",
-  "SourceRepositoryDigest": "91cce99aa1af750c246b622e3341a890900a3026",
-  "SourceRepositoryRef": "refs/heads/main",
-  "SourceRepositoryIdentifier": "967219080",
-  "SourceRepositoryOwnerURI": "https://github.com/actionutils",
-  "SourceRepositoryOwnerIdentifier": "206433623",
-  "BuildConfigURI": "https://github.com/actionutils/sigspy/.github/workflows/release.yml@refs/heads/main",
-  "BuildConfigDigest": "91cce99aa1af750c246b622e3341a890900a3026",
-  "BuildTrigger": "push",
-  "RunInvocationURI": "https://github.com/actionutils/sigspy/actions/runs/16041355680/attempts/1",
-  "SourceRepositoryVisibilityAtSigning": "public"
+  "version": "1",
+  "input": { "format": "pkcs7" },
+  "certificate": {
+    "subject": { "commonName": "sigstore" },
+    "issuer": { "commonName": "Fulcio" },
+    "serialNumberHex": "01AB…",
+    "notBefore": "2025-01-01T00:00:00Z",
+    "notAfter": "2025-01-02T00:00:00Z",
+    "sha256FingerprintHex": "A1B2…",
+    "publicKeyAlgorithm": "RSA"
+  },
+  "fulcio_extensions": { "Issuer": "https://token.actions…", "GithubWorkflowSHA": "…" },
+  "cms": {
+    "hasSignedAttributes": true,
+    "signedAttributesDERBase64": "…",
+    "signedAttributesSHA256Hex": "…",
+    "signatureAlgorithm": "1.2.840.113549.1.1.11",
+    "signatureBase64": "…"
+  },
+  "rekor": {
+  "present": true,
+  "oid": "1.3.6.1.4.1.57264.3.1",
+  "transparencyLogEntry": { "logIndex": 123, "integratedTime": 1700000000, "logId": { "keyId": "…" }, "inclusionProof": { "logIndex": 123, "treeSize": 456, "rootHash": "…", "hashes": ["…"] } }
+  }
 }
 ```
 
