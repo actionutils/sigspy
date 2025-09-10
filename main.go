@@ -9,6 +9,7 @@ import (
     "encoding/hex"
     "encoding/json"
     "encoding/pem"
+    "errors"
     "flag"
     "fmt"
     "io"
@@ -167,8 +168,138 @@ type ourAttribute struct {
     Value asn1.RawValue `asn1:"set"`
 }
 
+// extract CMS/SignedAttrs/Rekor from a PKCS7 structure
+func extractFromPKCS7(p7 *pkcs7.PKCS7) (*x509.Certificate, *CMSSummary, *RekorSummary, error) {
+    if len(p7.Signers) == 0 {
+        return nil, nil, nil, fmt.Errorf("no signers in PKCS7 data")
+    }
+    s := p7.Signers[0]
+
+    // Select signer certificate by Issuer+Serial match; fallback to GetOnlySigner/first cert
+    var signerCert *x509.Certificate
+    for _, c := range p7.Certificates {
+        if signerMatch(c, s.IssuerAndSerialNumber.IssuerName, s.IssuerAndSerialNumber.SerialNumber) {
+            signerCert = c
+            break
+        }
+    }
+    if signerCert == nil {
+        signerCert = p7.GetOnlySigner()
+        if signerCert == nil && len(p7.Certificates) > 0 {
+            signerCert = p7.Certificates[0]
+        }
+    }
+
+    cms := &CMSSummary{}
+    if len(s.AuthenticatedAttributes) > 0 {
+        conv := make([]ourAttribute, 0, len(s.AuthenticatedAttributes))
+        for _, a := range s.AuthenticatedAttributes {
+            conv = append(conv, ourAttribute{Type: a.Type, Value: a.Value})
+        }
+        type container struct{ A []ourAttribute `asn1:"set"` }
+        if enc, err := asn1.Marshal(container{A: conv}); err == nil {
+            var raw asn1.RawValue
+            _, _ = asn1.Unmarshal(enc, &raw)
+            cms.HasSignedAttributes = true
+            cms.SignedAttrsDER = base64.StdEncoding.EncodeToString(raw.Bytes)
+            sum := sha256.Sum256(raw.Bytes)
+            cms.SignedAttrsSHA256 = strings.ToUpper(hex.EncodeToString(sum[:]))
+        }
+    }
+    if len(s.EncryptedDigest) > 0 {
+        cms.Signature = base64.StdEncoding.EncodeToString(s.EncryptedDigest)
+    }
+    cms.SignatureAlgorithm = s.DigestEncryptionAlgorithm.Algorithm.String()
+
+    // Rekor proto in unauthenticated attributes
+    var rekor *RekorSummary
+    const rekorOID = "1.3.6.1.4.1.57264.3.1"
+    for _, a := range s.UnauthenticatedAttributes {
+        if a.Type.String() == rekorOID {
+            var embedded []byte
+            if _, err := asn1.Unmarshal(a.Value.Bytes, &embedded); err == nil {
+                pb := new(rekorpb.TransparencyLogEntry)
+                if err := protov1.Unmarshal(embedded, pb); err == nil {
+                    opts := protojson.MarshalOptions{EmitUnpopulated: false, UseProtoNames: true}
+                    if jb, err := opts.Marshal(pb); err == nil {
+                        rekor = &RekorSummary{Present: true, OID: rekorOID, Entry: json.RawMessage(jb)}
+                    } else {
+                        rekor = &RekorSummary{Present: true, OID: rekorOID, Error: err.Error()}
+                    }
+                } else {
+                    rekor = &RekorSummary{Present: true, OID: rekorOID, Error: err.Error()}
+                }
+            } else {
+                rekor = &RekorSummary{Present: true, OID: rekorOID, Error: err.Error()}
+            }
+            break
+        }
+    }
+    if rekor == nil {
+        rekor = &RekorSummary{Present: false, OID: rekorOID}
+    }
+
+    return signerCert, cms, rekor, nil
+}
+
+func extractFromPKCS7DER(der []byte) (*x509.Certificate, *CMSSummary, *RekorSummary, error) {
+    p7, err := pkcs7.Parse(der)
+    if err != nil {
+        return nil, nil, nil, err
+    }
+    return extractFromPKCS7(p7)
+}
+
+func detectAndParse(data []byte, mode string) (*x509.Certificate, *CMSSummary, *RekorSummary, error) {
+    switch mode {
+    case "auto":
+        if b, _ := pem.Decode(data); b != nil {
+            t := strings.ToUpper(strings.TrimSpace(b.Type))
+            switch t {
+            case "CERTIFICATE":
+                cert, err := x509.ParseCertificate(b.Bytes)
+                if err != nil { return nil, nil, nil, err }
+                return cert, nil, nil, nil
+            case "PKCS7", "SIGNED MESSAGE":
+                return extractFromPKCS7DER(b.Bytes)
+            default:
+                // Try PKCS7, then certificate
+                if cert, cms, rekor, err := extractFromPKCS7DER(b.Bytes); err == nil {
+                    return cert, cms, rekor, nil
+                }
+                if cert, err := x509.ParseCertificate(b.Bytes); err == nil {
+                    return cert, nil, nil, nil
+                }
+                return nil, nil, nil, fmt.Errorf("unsupported PEM block: %s", b.Type)
+            }
+        }
+        // No PEM armor: try PKCS7 DER then cert DER
+        if cert, cms, rekor, err := extractFromPKCS7DER(data); err == nil {
+            return cert, cms, rekor, nil
+        }
+        if cert, err := x509.ParseCertificate(data); err == nil { return cert, nil, nil, nil }
+        return nil, nil, nil, errors.New("failed to auto-detect input (not PKCS7 nor certificate)")
+    case "pkcs7":
+        // Accept PEM or DER
+        pemContent := string(data)
+        pemContent = strings.ReplaceAll(pemContent, "SIGNED MESSAGE", "PKCS7")
+        if b, _ := pem.Decode([]byte(pemContent)); b != nil {
+            return extractFromPKCS7DER(b.Bytes)
+        }
+        return extractFromPKCS7DER(data)
+    case "der":
+        cert, err := x509.ParseCertificate(data)
+        return cert, nil, nil, err
+    case "pem":
+        cert, err := parseCertFromPEMOrDER(data)
+        return cert, nil, nil, err
+    default:
+        return nil, nil, nil, fmt.Errorf("unknown input format: %s", mode)
+    }
+}
+
 func main() {
-    inputFormat := flag.String("input-format", "pkcs7", "Input format: pkcs7, der, pem")
+    inputFormat := flag.String("input-format", "auto", "Input format: auto, pkcs7, der, pem")
     pretty := flag.Bool("pretty", false, "Pretty-print JSON output")
     flag.Parse()
 
@@ -180,138 +311,22 @@ func main() {
 
     out := Output{Version: "1", Input: InputMeta{Format: *inputFormat}}
 
-    var cert *x509.Certificate
-    var fulcioExt any
-    var cms *CMSSummary
-    var rekor *RekorSummary
-
-    switch *inputFormat {
-    case "der":
-        cert, err = x509.ParseCertificate(inputData)
-        if err != nil {
-            log.Fatalf("Failed to parse DER certificate: %v", err)
-        }
-    case "pem":
-        c, err := parseCertFromPEMOrDER(inputData)
-        if err != nil {
-            log.Fatalf("Failed to parse PEM certificate: %v", err)
-        }
-        cert = c
-    case "pkcs7":
-        // Accept PEM armor labeled PKCS7 or SIGNED MESSAGE
-        pemContent := string(inputData)
-        pemContent = strings.ReplaceAll(pemContent, "SIGNED MESSAGE", "PKCS7")
-        var der []byte
-        if b, _ := pem.Decode([]byte(pemContent)); b != nil {
-            der = b.Bytes
-        } else {
-            // Assume raw DER
-            der = inputData
-        }
-
-        p7, err := pkcs7.Parse(der)
-        if err != nil {
-            log.Fatalf("Failed to parse PKCS7 data: %v", err)
-        }
-        if len(p7.Signers) == 0 {
-            log.Fatalf("No signers in PKCS7 data")
-        }
-
-        // Choose signer cert by Issuer+Serial match; fallback to GetOnlySigner
-        var signerCert *x509.Certificate
-        // iterate certificates to match first signer
-        {
-            s := p7.Signers[0]
-            for _, c := range p7.Certificates {
-                // Access nested fields through exported field names on unexported type
-                if signerMatch(c, s.IssuerAndSerialNumber.IssuerName, s.IssuerAndSerialNumber.SerialNumber) {
-                    signerCert = c
-                    break
-                }
-            }
-            if signerCert == nil {
-                signerCert = p7.GetOnlySigner()
-                if signerCert == nil && len(p7.Certificates) > 0 {
-                    signerCert = p7.Certificates[0]
-                }
-            }
-
-            // Build CMS summary
-            cms = &CMSSummary{}
-            if len(s.AuthenticatedAttributes) > 0 {
-                // Convert attributes into ourAttribute and marshal
-                conv := make([]ourAttribute, 0, len(s.AuthenticatedAttributes))
-                for _, a := range s.AuthenticatedAttributes {
-                    conv = append(conv, ourAttribute{Type: a.Type, Value: a.Value})
-                }
-                // Build DER of SET OF attributes (content only)
-                type container struct{ A []ourAttribute `asn1:"set"` }
-                enc, err := asn1.Marshal(container{A: conv})
-                if err == nil {
-                    var raw asn1.RawValue
-                    _, _ = asn1.Unmarshal(enc, &raw)
-                    cms.HasSignedAttributes = true
-                    cms.SignedAttrsDER = base64.StdEncoding.EncodeToString(raw.Bytes)
-                    sum := sha256.Sum256(raw.Bytes)
-                    cms.SignedAttrsSHA256 = strings.ToUpper(hex.EncodeToString(sum[:]))
-                }
-            }
-            // Signature bytes
-            if len(s.EncryptedDigest) > 0 {
-                cms.Signature = base64.StdEncoding.EncodeToString(s.EncryptedDigest)
-            }
-            cms.SignatureAlgorithm = s.DigestEncryptionAlgorithm.Algorithm.String()
-
-            // Extract Rekor proto from unauthenticated attributes
-            const rekorOID = "1.3.6.1.4.1.57264.3.1"
-            for _, a := range s.UnauthenticatedAttributes {
-                if a.Type.String() == rekorOID {
-                    var embedded []byte
-                    if _, err := asn1.Unmarshal(a.Value.Bytes, &embedded); err == nil {
-                        // Decode proto and marshal to JSON
-                        pb := new(rekorpb.TransparencyLogEntry)
-                        if err := protov1.Unmarshal(embedded, pb); err == nil {
-                            opts := protojson.MarshalOptions{EmitUnpopulated: false, UseProtoNames: true}
-                            if jb, err := opts.Marshal(pb); err == nil {
-                                rekor = &RekorSummary{Present: true, OID: rekorOID, Entry: json.RawMessage(jb)}
-                            } else {
-                                rekor = &RekorSummary{Present: true, OID: rekorOID, Error: err.Error()}
-                            }
-                        } else {
-                            rekor = &RekorSummary{Present: true, OID: rekorOID, Error: err.Error()}
-                        }
-                    } else {
-                        // Attribute present but could not decode
-                        rekor = &RekorSummary{Present: true, OID: rekorOID, Error: err.Error()}
-                    }
-                    break
-                }
-            }
-            if rekor == nil {
-                rekor = &RekorSummary{Present: false, OID: rekorOID}
-            }
-        }
-        cert = signerCert
-    default:
-        log.Fatalf("Unknown input format: %s. Supported: pkcs7, der, pem", *inputFormat)
+    cert, cms, rekor, err := detectAndParse(inputData, *inputFormat)
+    if err != nil {
+        log.Fatalf("Failed to parse input: %v", err)
     }
 
     if cert != nil {
         out.Certificate = summarizeCert(cert)
         // Parse Fulcio extensions
         if ext, err := certificate.ParseExtensions(cert.Extensions); err == nil {
-            fulcioExt = ext
+            out.Fulcio = ext
         } else {
-            fulcioExt = map[string]any{"error": err.Error()}
+            out.Fulcio = map[string]any{"error": err.Error()}
         }
-        out.Fulcio = fulcioExt
     }
-    if cms != nil {
-        out.CMS = cms
-    }
-    if rekor != nil {
-        out.Rekor = rekor
-    }
+    if cms != nil { out.CMS = cms }
+    if rekor != nil { out.Rekor = rekor }
 
     enc := json.NewEncoder(os.Stdout)
     if *pretty {
