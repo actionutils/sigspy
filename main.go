@@ -6,6 +6,7 @@ import (
     "crypto/x509/pkix"
     "encoding/asn1"
     "encoding/base64"
+    "encoding/binary"
     "encoding/hex"
     "encoding/json"
     "encoding/pem"
@@ -34,6 +35,7 @@ type Output struct {
     Fulcio      any              `json:"fulcio_extensions,omitempty"`
     CMS         *CMSSummary      `json:"cms,omitempty"`
     Rekor       *RekorSummary    `json:"rekor,omitempty"`
+    CT          *CTSummary       `json:"ct,omitempty"`
 }
 
 type InputMeta struct {
@@ -82,6 +84,22 @@ type RekorSummary struct {
     OID      string          `json:"oid"`
     Entry    json.RawMessage `json:"transparencyLogEntry,omitempty"`
     Error    string          `json:"error,omitempty"`
+}
+
+// CT (Certificate Transparency) summary
+type CTSummary struct {
+    PrecertificateSCTs []SCT `json:"precertificateSCTs,omitempty"`
+}
+
+type SCT struct {
+    Version             int    `json:"version"`
+    LogIDHex            string `json:"logIDHex"`
+    Timestamp           int64  `json:"timestampMs"`
+    TimestampRFC3339    string `json:"timestampRFC3339"`
+    ExtensionsBase64    string `json:"extensionsBase64,omitempty"`
+    HashAlgorithm       string `json:"hashAlgorithm"`
+    SignatureAlgorithm  string `json:"signatureAlgorithm"`
+    SignatureBase64     string `json:"signatureBase64"`
 }
 
 // Helper to summarize x509.Name
@@ -166,6 +184,144 @@ func asn1Equal(a, b []byte) bool { return len(a) == len(b) && (len(a) == 0 || st
 type ourAttribute struct {
     Type  asn1.ObjectIdentifier
     Value asn1.RawValue `asn1:"set"`
+}
+
+// Parse Certificate Transparency SCT list from extension OID 1.3.6.1.4.1.11129.2.4.2
+func summarizeCT(cert *x509.Certificate) *CTSummary {
+    const oidSCT = "1.3.6.1.4.1.11129.2.4.2"
+    var raw []byte
+    for _, ext := range cert.Extensions {
+        if ext.Id.String() == oidSCT {
+            raw = ext.Value
+            break
+        }
+    }
+    if len(raw) == 0 {
+        return nil
+    }
+    scts, err := parseSCTList(raw)
+    if err != nil {
+        // be forgiving: still return partial parsing if any
+        if len(scts) == 0 {
+            return nil
+        }
+    }
+    return &CTSummary{PrecertificateSCTs: scts}
+}
+
+func parseSCTList(b []byte) ([]SCT, error) {
+    var out []SCT
+    if len(b) < 2 {
+        return out, fmt.Errorf("sct list too short")
+    }
+    listLen := int(binary.BigEndian.Uint16(b[0:2]))
+    // Some issuers may omit outer length; be lenient if mismatch
+    off := 2
+    end := off + listLen
+    if end > len(b) {
+        end = len(b)
+    }
+    for off+2 <= end {
+        sctLen := int(binary.BigEndian.Uint16(b[off : off+2]))
+        off += 2
+        if off+sctLen > len(b) {
+            break
+        }
+        sctBytes := b[off : off+sctLen]
+        off += sctLen
+        if sct, err := parseSCT(sctBytes); err == nil {
+            out = append(out, *sct)
+        }
+    }
+    if len(out) == 0 {
+        return out, fmt.Errorf("no valid SCTs found")
+    }
+    return out, nil
+}
+
+func parseSCT(b []byte) (*SCT, error) {
+    // RFC 6962 v1 SerializedSCT
+    // 1: version, 32: logID, 8: timestamp, 2: extLen, ext, 1: hashAlgo, 1: sigAlgo, 2: sigLen, sig
+    if len(b) < 1+32+8+2+1+1+2 {
+        return nil, fmt.Errorf("sct too short")
+    }
+    v := int(b[0])
+    pos := 1
+    logID := b[pos : pos+32]
+    pos += 32
+    ts := int64(binary.BigEndian.Uint64(b[pos : pos+8]))
+    pos += 8
+    if pos+2 > len(b) {
+        return nil, fmt.Errorf("sct truncated at extensions length")
+    }
+    extLen := int(binary.BigEndian.Uint16(b[pos : pos+2]))
+    pos += 2
+    if pos+extLen > len(b) {
+        return nil, fmt.Errorf("sct truncated at extensions")
+    }
+    exts := b[pos : pos+extLen]
+    pos += extLen
+    if pos+1+1+2 > len(b) {
+        return nil, fmt.Errorf("sct truncated at signature header")
+    }
+    hashAlg := b[pos]
+    pos++
+    sigAlg := b[pos]
+    pos++
+    sigLen := int(binary.BigEndian.Uint16(b[pos : pos+2]))
+    pos += 2
+    if pos+sigLen > len(b) {
+        return nil, fmt.Errorf("sct truncated at signature")
+    }
+    sig := b[pos : pos+sigLen]
+
+    s := &SCT{
+        Version:            v,
+        LogIDHex:           strings.ToUpper(hex.EncodeToString(logID)),
+        Timestamp:          ts,
+        TimestampRFC3339:   time.Unix(0, ts*int64(time.Millisecond)).UTC().Format(time.RFC3339),
+        ExtensionsBase64:   base64.StdEncoding.EncodeToString(exts),
+        HashAlgorithm:      tlsHashAlgName(hashAlg),
+        SignatureAlgorithm: tlsSigAlgName(sigAlg),
+        SignatureBase64:    base64.StdEncoding.EncodeToString(sig),
+    }
+    return s, nil
+}
+
+func tlsHashAlgName(b byte) string {
+    switch b {
+    case 0:
+        return "none"
+    case 1:
+        return "md5"
+    case 2:
+        return "sha1"
+    case 3:
+        return "sha224"
+    case 4:
+        return "sha256"
+    case 5:
+        return "sha384"
+    case 6:
+        return "sha512"
+    default:
+        return fmt.Sprintf("unknown(%d)", b)
+    }
+}
+
+func tlsSigAlgName(b byte) string {
+    switch b {
+    case 0:
+        return "anonymous"
+    case 1:
+        return "rsa"
+    case 2:
+        return "dsa"
+    case 3:
+        return "ecdsa"
+    default:
+        return fmt.Sprintf("unknown(%d)\n", b)
+    }
 }
 
 // extract CMS/SignedAttrs/Rekor from a PKCS7 structure
@@ -327,6 +483,10 @@ func main() {
             out.Fulcio = ext
         } else {
             out.Fulcio = map[string]any{"error": err.Error()}
+        }
+        // Parse CT Precertificate SCTs (OID 1.3.6.1.4.1.11129.2.4.2)
+        if ct := summarizeCT(cert); ct != nil {
+            out.CT = ct
         }
     }
     if cms != nil { out.CMS = cms }

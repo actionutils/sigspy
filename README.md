@@ -84,6 +84,7 @@ sigspy now returns a single JSON envelope that is easy to extend and includes:
 - `fulcio_extensions`: parsed [Fulcio OIDs](https://github.com/sigstore/fulcio/blob/main/docs/oid-info.md)
 - `cms`: when input is PKCS7, signed attributes digest and signature info
 - `rekor`: when available, embedded TransparencyLogEntry (JSON) from OID `1.3.6.1.4.1.57264.3.1`
+- `ct`: parsed CT Precertificate SCTs from OID `1.3.6.1.4.1.11129.2.4.2`
 
 Example (trimmed):
 
@@ -112,6 +113,12 @@ Example (trimmed):
   "present": true,
   "oid": "1.3.6.1.4.1.57264.3.1",
   "transparencyLogEntry": { "logIndex": 123, "integratedTime": 1700000000, "logId": { "keyId": "…" }, "inclusionProof": { "logIndex": 123, "treeSize": 456, "rootHash": "…", "hashes": ["…"] } }
+  }
+  ,
+  "ct": {
+    "precertificateSCTs": [
+      { "version": 1, "logIDHex": "…", "timestampMs": 1700000000000, "timestampRFC3339": "2023-11-14T00:00:00Z", "hashAlgorithm": "sha256", "signatureAlgorithm": "ecdsa", "signatureBase64": "…" }
+    ]
   }
 }
 ```
