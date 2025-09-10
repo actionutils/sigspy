@@ -47,13 +47,14 @@ go install github.com/actionutils/sigspy@latest
 ## Usage
 
 ```shell
-sigspy -input-format=<format> < certificate_file
+sigspy [-input-format=auto|pkcs7|der|pem] < input
 ```
 
 Formats:
-- `pkcs7` (default) - PEM-encoded PKCS7 signatures (e.g., Git signatures)
-- `der` - Raw binary certificate data
-- `pem` - PEM-encoded certificates (-----BEGIN CERTIFICATE-----)
+- `auto` (default) - auto-detect PEM/DER and PKCS7/CMS. If PKCS7/CMS, emit CMS + Rekor; if certificate, emit Fulcio extensions + basic cert info.
+- `pkcs7` - treat input as PKCS7/CMS (PEM with BEGIN PKCS7 or SIGNED MESSAGE, or raw DER)
+- `der` - treat input as a certificate (DER)
+- `pem` - treat input as a certificate (PEM)
 
 ## Examples
 
