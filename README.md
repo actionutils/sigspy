@@ -90,7 +90,7 @@ Example (trimmed):
 ```json
 {
   "version": "1",
-  "input": { "format": "pkcs7" },
+  "input": { "detectedFormat": "pkcs7" },
   "certificate": {
     "subject": { "commonName": "sigstore" },
     "issuer": { "commonName": "Fulcio" },

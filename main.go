@@ -37,7 +37,7 @@ type Output struct {
 }
 
 type InputMeta struct {
-    Format string `json:"format"`
+    Detected string `json:"detectedFormat"`
 }
 
 type CertSummary struct {
@@ -250,7 +250,7 @@ func extractFromPKCS7DER(der []byte) (*x509.Certificate, *CMSSummary, *RekorSumm
     return extractFromPKCS7(p7)
 }
 
-func detectAndParse(data []byte, mode string) (*x509.Certificate, *CMSSummary, *RekorSummary, error) {
+func detectAndParse(data []byte, mode string) (*x509.Certificate, *CMSSummary, *RekorSummary, string, error) {
     switch mode {
     case "auto":
         if b, _ := pem.Decode(data); b != nil {
@@ -258,43 +258,46 @@ func detectAndParse(data []byte, mode string) (*x509.Certificate, *CMSSummary, *
             switch t {
             case "CERTIFICATE":
                 cert, err := x509.ParseCertificate(b.Bytes)
-                if err != nil { return nil, nil, nil, err }
-                return cert, nil, nil, nil
+                if err != nil { return nil, nil, nil, "", err }
+                return cert, nil, nil, "certificate-pem", nil
             case "PKCS7", "SIGNED MESSAGE":
-                return extractFromPKCS7DER(b.Bytes)
+                c, cms, r, err := extractFromPKCS7DER(b.Bytes)
+                return c, cms, r, "pkcs7", err
             default:
                 // Try PKCS7, then certificate
                 if cert, cms, rekor, err := extractFromPKCS7DER(b.Bytes); err == nil {
-                    return cert, cms, rekor, nil
+                    return cert, cms, rekor, "pkcs7", nil
                 }
                 if cert, err := x509.ParseCertificate(b.Bytes); err == nil {
-                    return cert, nil, nil, nil
+                    return cert, nil, nil, "certificate-pem", nil
                 }
-                return nil, nil, nil, fmt.Errorf("unsupported PEM block: %s", b.Type)
+                return nil, nil, nil, "", fmt.Errorf("unsupported PEM block: %s", b.Type)
             }
         }
         // No PEM armor: try PKCS7 DER then cert DER
         if cert, cms, rekor, err := extractFromPKCS7DER(data); err == nil {
-            return cert, cms, rekor, nil
+            return cert, cms, rekor, "pkcs7", nil
         }
-        if cert, err := x509.ParseCertificate(data); err == nil { return cert, nil, nil, nil }
-        return nil, nil, nil, errors.New("failed to auto-detect input (not PKCS7 nor certificate)")
+        if cert, err := x509.ParseCertificate(data); err == nil { return cert, nil, nil, "certificate-der", nil }
+        return nil, nil, nil, "", errors.New("failed to auto-detect input (not PKCS7 nor certificate)")
     case "pkcs7":
         // Accept PEM or DER
         pemContent := string(data)
         pemContent = strings.ReplaceAll(pemContent, "SIGNED MESSAGE", "PKCS7")
         if b, _ := pem.Decode([]byte(pemContent)); b != nil {
-            return extractFromPKCS7DER(b.Bytes)
+            c, cms, r, err := extractFromPKCS7DER(b.Bytes)
+            return c, cms, r, "pkcs7", err
         }
-        return extractFromPKCS7DER(data)
+        c, cms, r, err := extractFromPKCS7DER(data)
+        return c, cms, r, "pkcs7", err
     case "der":
         cert, err := x509.ParseCertificate(data)
-        return cert, nil, nil, err
+        return cert, nil, nil, "certificate-der", err
     case "pem":
         cert, err := parseCertFromPEMOrDER(data)
-        return cert, nil, nil, err
+        return cert, nil, nil, "certificate-pem", err
     default:
-        return nil, nil, nil, fmt.Errorf("unknown input format: %s", mode)
+        return nil, nil, nil, "", fmt.Errorf("unknown input format: %s", mode)
     }
 }
 
@@ -309,12 +312,13 @@ func main() {
         log.Fatalf("Failed to read from stdin: %v", err)
     }
 
-    out := Output{Version: "1", Input: InputMeta{Format: *inputFormat}}
+    out := Output{Version: "1"}
 
-    cert, cms, rekor, err := detectAndParse(inputData, *inputFormat)
+    cert, cms, rekor, detected, err := detectAndParse(inputData, *inputFormat)
     if err != nil {
         log.Fatalf("Failed to parse input: %v", err)
     }
+    out.Input = InputMeta{Detected: detected}
 
     if cert != nil {
         out.Certificate = summarizeCert(cert)
