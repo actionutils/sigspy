@@ -1,4 +1,4 @@
-module github.com/actionutils/sigspy
+module github.com/actionutils/sigspy/v2
 
 go 1.24.2
 
