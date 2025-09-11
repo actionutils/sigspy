@@ -17,6 +17,7 @@ import (
 	"log"
 	"math/big"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -484,9 +485,69 @@ func detectAndParse(data []byte, mode string) (*x509.Certificate, *CMSSummary, *
 	}
 }
 
+var (
+	version = "dev"
+	commit  = ""
+)
+
+func getVersion() string {
+	v := version
+
+	// If version is "dev", try to get from build info
+	if v == "dev" {
+		if info, ok := debug.ReadBuildInfo(); ok {
+			if info.Main.Version != "" && info.Main.Version != "(devel)" {
+				v = info.Main.Version
+			}
+		}
+	}
+
+	// Get commit hash
+	commitHash := commit
+	if commitHash == "" {
+		// Try to get from build info
+		if info, ok := debug.ReadBuildInfo(); ok {
+			var revision, modified string
+			for _, setting := range info.Settings {
+				switch setting.Key {
+				case "vcs.revision":
+					revision = setting.Value
+				case "vcs.modified":
+					modified = setting.Value
+				}
+			}
+			if revision != "" {
+				if len(revision) > 7 {
+					revision = revision[:7]
+				}
+				if modified == "true" {
+					revision += "-dirty"
+				}
+				commitHash = revision
+			}
+		}
+	} else if len(commitHash) > 7 {
+		// Truncate commit hash from ldflags
+		commitHash = commitHash[:7]
+	}
+
+	// Format: "sigspy version X.Y.Z (commit)"
+	result := "sigspy version " + v
+	if commitHash != "" {
+		result += " (" + commitHash + ")"
+	}
+	return result
+}
+
 func main() {
 	inputFormat := flag.String("input-format", "auto", "Input format: auto, pkcs7, der, pem")
+	versionFlag := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Println(getVersion())
+		os.Exit(0)
+	}
 
 	// Read all stdin
 	inputData, err := io.ReadAll(os.Stdin)

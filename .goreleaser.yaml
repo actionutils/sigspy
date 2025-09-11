@@ -18,9 +18,7 @@ builds:
     # ensures mod timestamp to be the commit timestamp
     mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
-      # use commit date instead of current date as main.date
-      # only needed if you actually use those things in your main package, otherwise can be ignored.
-      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{ .CommitDate }}
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}}
 
 # proxies from the go mod proxy before building
 # https://goreleaser.com/customization/gomod
@@ -59,8 +57,6 @@ sboms:
   - id: source # Two different sbom configurations need two different IDs
     artifacts: source
 
-# signs the checksum file
-# all files (including the sboms) are included in the checksum, so we don't need to sign each one if we don't want to
 # https://goreleaser.com/customization/sign
 signs:
   - cmd: cosign
@@ -71,5 +67,5 @@ signs:
       - "--output-signature=${signature}"
       - "${artifact}"
       - "--yes" # needed on cosign 2.0.0+
-    artifacts: checksum
+    artifacts: all
     output: true
