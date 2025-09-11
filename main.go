@@ -17,6 +17,7 @@ import (
 	"log"
 	"math/big"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -484,9 +485,51 @@ func detectAndParse(data []byte, mode string) (*x509.Certificate, *CMSSummary, *
 	}
 }
 
+var version = "dev"
+
+func getVersion() string {
+	// First try the ldflags version
+	if version != "dev" {
+		return version
+	}
+
+	// Fall back to build info
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if info.Main.Version != "" && info.Main.Version != "(devel)" {
+			return info.Main.Version
+		}
+		// Try to get VCS revision if available
+		var revision, modified string
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision":
+				revision = setting.Value
+			case "vcs.modified":
+				modified = setting.Value
+			}
+		}
+		if revision != "" {
+			if len(revision) > 7 {
+				revision = revision[:7]
+			}
+			if modified == "true" {
+				revision += "-dirty"
+			}
+			return "dev-" + revision
+		}
+	}
+	return version
+}
+
 func main() {
 	inputFormat := flag.String("input-format", "auto", "Input format: auto, pkcs7, der, pem")
+	versionFlag := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Println(getVersion())
+		os.Exit(0)
+	}
 
 	// Read all stdin
 	inputData, err := io.ReadAll(os.Stdin)
