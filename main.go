@@ -485,40 +485,58 @@ func detectAndParse(data []byte, mode string) (*x509.Certificate, *CMSSummary, *
 	}
 }
 
-var version = "dev"
+var (
+	version = "dev"
+	commit  = ""
+)
 
 func getVersion() string {
-	// First try the ldflags version
-	if version != "dev" {
-		return version
+	v := version
+
+	// If version is "dev", try to get from build info
+	if v == "dev" {
+		if info, ok := debug.ReadBuildInfo(); ok {
+			if info.Main.Version != "" && info.Main.Version != "(devel)" {
+				v = info.Main.Version
+			}
+		}
 	}
 
-	// Fall back to build info
-	if info, ok := debug.ReadBuildInfo(); ok {
-		if info.Main.Version != "" && info.Main.Version != "(devel)" {
-			return info.Main.Version
-		}
-		// Try to get VCS revision if available
-		var revision, modified string
-		for _, setting := range info.Settings {
-			switch setting.Key {
-			case "vcs.revision":
-				revision = setting.Value
-			case "vcs.modified":
-				modified = setting.Value
+	// Get commit hash
+	commitHash := commit
+	if commitHash == "" {
+		// Try to get from build info
+		if info, ok := debug.ReadBuildInfo(); ok {
+			var revision, modified string
+			for _, setting := range info.Settings {
+				switch setting.Key {
+				case "vcs.revision":
+					revision = setting.Value
+				case "vcs.modified":
+					modified = setting.Value
+				}
+			}
+			if revision != "" {
+				if len(revision) > 7 {
+					revision = revision[:7]
+				}
+				if modified == "true" {
+					revision += "-dirty"
+				}
+				commitHash = revision
 			}
 		}
-		if revision != "" {
-			if len(revision) > 7 {
-				revision = revision[:7]
-			}
-			if modified == "true" {
-				revision += "-dirty"
-			}
-			return "dev-" + revision
-		}
+	} else if len(commitHash) > 7 {
+		// Truncate commit hash from ldflags
+		commitHash = commitHash[:7]
 	}
-	return version
+
+	// Format: "sigspy version X.Y.Z (commit)"
+	result := "sigspy version " + v
+	if commitHash != "" {
+		result += " (" + commitHash + ")"
+	}
+	return result
 }
 
 func main() {
