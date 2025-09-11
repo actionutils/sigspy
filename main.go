@@ -486,7 +486,6 @@ func detectAndParse(data []byte, mode string) (*x509.Certificate, *CMSSummary, *
 
 func main() {
 	inputFormat := flag.String("input-format", "auto", "Input format: auto, pkcs7, der, pem")
-	pretty := flag.Bool("pretty", false, "Pretty-print JSON output")
 	flag.Parse()
 
 	// Read all stdin
@@ -524,9 +523,6 @@ func main() {
 	}
 
 	enc := json.NewEncoder(os.Stdout)
-	if *pretty {
-		enc.SetIndent("", "  ")
-	}
 	if err := enc.Encode(out); err != nil {
 		log.Fatalf("Failed to marshal JSON: %v", err)
 	}
