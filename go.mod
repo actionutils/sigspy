@@ -6,7 +6,7 @@ require (
 	github.com/sigstore/fulcio v1.7.1
 	github.com/sigstore/protobuf-specs v0.4.1
 	github.com/smallstep/pkcs7 v0.2.1
-	google.golang.org/protobuf v1.36.6
+	google.golang.org/protobuf v1.36.9
 )
 
 require (
